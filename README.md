@@ -1,36 +1,34 @@
 # Multi-Client Chat Application in C
 
-A real-time multi-client chat application built in C using TCP sockets and POSIX threads (pthreads). The application allows multiple users to connect simultaneously and communicate in real-time with additional features like user management and special commands.
+A real-time multi-client chat application built in C using TCP sockets and POSIX threads. The application allows multiple users to connect simultaneously and chat in real-time, with additional features like user tracking and special commands.
 
 ## Features
 
-### 🚀 Core Functionality
-- **Multi-client support**: Up to 10 concurrent users
-- **Real-time messaging**: Instant message broadcasting to all connected users
-- **Multi-threaded architecture**: Non-blocking message handling using pthreads
-- **Username-based identification**: Each user has a unique username
+### Core Functionality
+- Up to 10 concurrent users
+- Instant message broadcasting to all connected users
+- Non-blocking message handling using pthreads
+- Username-based identification
 
-### 🎯 Advanced Features
-- **Online users command**: Type `:online` to see all connected users
-- **Graceful disconnection**: Type `:end` to exit cleanly
-- **Timestamped messages**: All messages include HH:MM:SS timestamps
-- **Color-coded output**: Different colors for usernames, timestamps, and status messages
-- **Client status tracking**: Server monitors active/inactive clients
+### Commands and Formatting
+- Type `:online` to see all connected users
+- Type `:end` to exit cleanly
+- All messages include HH:MM:SS timestamps
+- Color-coded output for usernames, timestamps, and status messages
+- Server monitors active and inactive clients
 
-### 🛡️ Technical Features
-- **Socket reuse**: `SO_REUSEADDR` option for better server restarts
-- **Proper memory management**: Dynamic allocation with cleanup
-- **Error handling**: Comprehensive error checking and reporting
-- **Message parsing**: Handles multiple messages in single TCP stream
-- **Thread safety**: Safe concurrent operations
+### Technical Features
+- `SO_REUSEADDR` option so you don't get blocked on a server restart
+- Dynamic memory allocation with cleanup
+- Message parsing to handle multiple messages in a single TCP stream
 
 ## Requirements
 
 - GCC compiler
-- POSIX-compliant system (Linux, macOS, Unix)
+- Linux, macOS, or any POSIX-compliant system
 - pthread library support
 
-## Installation & Compilation
+## Installation and Compilation
 
 1. Clone the repository:
 ```bash
@@ -50,19 +48,19 @@ gcc -o client client.c -lpthread
 ```bash
 ./server
 ```
-The server will start listening on port 2000 and display connection status.
+The server will start listening on port 2000 and print connection updates.
 
 ### Connecting Clients
 ```bash
 ./client
 ```
 1. Enter your username when prompted
-2. Start chatting!
+2. Start chatting
 
 ### Chat Commands
-- `:online` - Display list of all connected users
-- `:end` - Exit the chat application
-- Regular messages - Just type and press Enter
+- `:online` - shows a list of everyone online
+- `:end` - exits the chat application
+- Regular messages - just type your text and hit enter
 
 ## Example Session
 
@@ -71,8 +69,7 @@ The server will start listening on port 2000 and display connection status.
 Server listening on port 2000...
 Connection succeeded
 Client connected from 127.0.0.1:45678
-Alice has connected
-[14:30:15] Alice: Hello everyone!
+Alice has connected Alice: Hello everyone!
 === ONLINE COMMAND DETECTED ===
 User Bob requested online users list
 ```
@@ -81,8 +78,7 @@ User Bob requested online users list
 ```
 Connected to server at 127.0.0.1:2000
 Enter your username: Alice
-You: Hello everyone!
-[14:30:20] Bob: Hi Alice!
+You: Hello everyone! Bob: Hi Alice!
 You: :online
 
 === Online Users ===
@@ -97,15 +93,15 @@ You:
 ## Architecture
 
 ### Server (`server.c`)
-- **Main thread**: Accepts new client connections
-- **Worker threads**: Handle individual client communication (one per client)
-- **Client management**: Maintains list of active clients with usernames
-- **Message broadcasting**: Forwards messages to all connected clients except sender
+- **Main thread**: listens for and accepts new client connections
+- **Worker threads**: handles individual client communication, spinning up one thread per client
+- **Client management**: keeps track of active clients and their names
+- **Message broadcasting**: forwards incoming messages to every user except the sender
 
 ### Client (`client.c`)
-- **Main thread**: Handles user input and sending messages
-- **Receiver thread**: Listens for incoming messages from server
-- **Non-blocking I/O**: User can type while receiving messages
+- **Main thread**: reads what you type and sends it out
+- **Receiver thread**: waits around for incoming messages from the server
+- **Non-blocking input**: keeps the prompt open so you can type while text is rolling in
 
 ## Technical Details
 
@@ -125,7 +121,6 @@ typedef struct {
 - **Max clients**: 10 concurrent connections
 
 ### Message Format
-Messages are formatted with timestamps and usernames:
 ```
 [HH:MM:SS] Username: Message content
 ```
@@ -138,6 +133,3 @@ Feel free to fork this project and submit pull requests for improvements or bug 
 
 This project is open source and available under the MIT License.
 
-## Author
-
-Built with ❤️ in C
