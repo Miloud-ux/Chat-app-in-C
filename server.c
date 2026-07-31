@@ -1,7 +1,9 @@
 #include <arpa/inet.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +22,11 @@ typedef struct {
   bool is_active;
 } client;
 
+// locks
+pthread_mutex_t server_clock_mutex = PTHREAD_MUTEX_INITIALIZER;
+uint64_t server_clock = 0;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static client client_list[MAX_CLIENTS];
 
 void client_init(client client_list[]) {
@@ -42,11 +48,12 @@ void empty_client_fds(client client_list[], client my_client) {
   }
 }
 
-void msg_formatter(char new_msg[], size_t new_msg_size, const char timestamp[],
-                   const char msg[], const char username[]) {
+void msg_formatter(char new_msg[], size_t new_msg_size, uint64_t lc,
+                   const char timestamp[], const char msg[],
+                   const char username[]) {
   snprintf(new_msg, new_msg_size,
-           "[\033[1;34m%s\033[0m] \033[1;35m%s\033[0m: %s\n", timestamp,
-           username, msg);
+           "[LC:%" PRIu64 "] [\033[1;34m%s\033[0m] \033[1;35m%s\033[0m: %s\n",
+           lc, timestamp, username, msg);
 }
 
 void *handle_client(void *arg) {
@@ -99,10 +106,11 @@ void *handle_client(void *arg) {
     char *end;
     msg = buffer;
 
-    /* Split messages by their delimiter ('\n') since TCP is a streaming
+    /* split messages by their delimiter ('\n') since TCP is a streaming
      * protocole meaning the buffer could fit Multiple messages at once and we
      * need to split them.
      */
+
     while ((end = strchr(msg, '\n'))) {
       *end = '\0';
       int len = strlen(msg);
@@ -116,8 +124,6 @@ void *handle_client(void *arg) {
         break_outer_loop = true;
         break;
       } else if (strcmp(msg, ":online") == 0) {
-        // Debugging
-        // printf("=== ONLINE COMMAND DETECTED ===\n");
         printf("User %s requested online users list\n", username);
         pthread_mutex_lock(&mutex);
         char online_users[2048] = "\n=== Online Users ===\n";
@@ -136,14 +142,40 @@ void *handle_client(void *arg) {
                  "==================\nTotal: %d users online\n", user_count);
         strcat(online_users, footer);
         pthread_mutex_unlock(&mutex);
-        write_full(my_client.client_socket, online_users,
-                   strlen(online_users));
+
+        write_full(my_client.client_socket, online_users, strlen(online_users));
         msg = end + 1;
         continue;
       } else {
+        uint64_t incoming_lc = 0;
+        char actual_msg[1024] = {0};
+        uint64_t broadcast_lc = 0;
+
+        // parse lamport timestamps lc|msg
+        if (sscanf(msg, "%" SCNu64 "|%1023[^\n]", &incoming_lc, actual_msg) ==
+            2) {
+          // l_serv = max(l_client, l_server) + 1
+          pthread_mutex_lock(&server_clock_mutex);
+          server_clock = MAX(incoming_lc, server_clock) + 1;
+          broadcast_lc = server_clock;
+          pthread_mutex_unlock(&server_clock_mutex);
+        } else {
+          // if a client sends without prefix lc (netcat)
+          pthread_mutex_lock(&server_clock_mutex);
+          server_clock++;
+          broadcast_lc = server_clock;
+          pthread_mutex_unlock(&server_clock_mutex);
+
+          strncpy(actual_msg, msg, sizeof(actual_msg) - 1);
+          actual_msg[sizeof(actual_msg) - 1] = '\0';
+        }
+
+        // 2. Format with LC header and ANSI colors
         char formatted_msg[1200];
-        msg_formatter(formatted_msg, sizeof(formatted_msg), timestamp, msg,
-                      username);
+        msg_formatter(formatted_msg, sizeof(formatted_msg), broadcast_lc,
+                      timestamp, actual_msg, username);
+
+        // 3. Broadcast to all active peers
         pthread_mutex_lock(&mutex);
         int target_sockets[MAX_CLIENTS];
         int target_count = 0;
@@ -154,9 +186,9 @@ void *handle_client(void *arg) {
           }
         }
         pthread_mutex_unlock(&mutex);
+
         for (int i = 0; i < target_count; i++) {
-          write_full(target_sockets[i], formatted_msg,
-                     strlen(formatted_msg));
+          write_full(target_sockets[i], formatted_msg, strlen(formatted_msg));
         }
         printf("%s", formatted_msg);
       }

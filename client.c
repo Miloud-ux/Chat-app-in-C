@@ -1,17 +1,21 @@
+#include "helpers.h"
 #include <arpa/inet.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "helpers.h"
-
 #define MAX_SIZE 1024
 #define REPLY_SIZE 2048
 #define PORT 8080
+
+pthread_mutex_t client_clock_mutex = PTHREAD_MUTEX_INITIALIZER;
+uint64_t client_clock = 0;
 
 void *receive_server_data(void *arg) {
   int client_socket = *(int *)arg;
@@ -22,6 +26,15 @@ void *receive_server_data(void *arg) {
     bytes_recv = read(client_socket, msg_received, sizeof(msg_received) - 1);
     if (bytes_recv > 0) {
       msg_received[bytes_recv] = '\0';
+
+      // Get the max clock
+      uint64_t server_lc = 0;
+      if (sscanf(msg_received, "[LC:%" SCNu64 "]", &server_lc) == 1) {
+        pthread_mutex_lock(&client_clock_mutex);
+        client_clock = MAX(server_lc, client_clock) + 1;
+        pthread_mutex_unlock(&client_clock_mutex);
+      }
+
       printf("\r\033[K");
       printf("%s", msg_received);
       printf("You :");
@@ -57,8 +70,7 @@ int main(void) {
   printf("Enter your username \n");
   fgets(username, sizeof(username), stdin);
   username[strcspn(username, "\n")] = '\0';
-  memset(username + strlen(username), 0,
-         sizeof(username) - strlen(username));
+  memset(username + strlen(username), 0, sizeof(username) - strlen(username));
   if (write_full(client_socket, username, sizeof(username)) != 0) {
     die("Writing username failed");
   }
@@ -80,7 +92,21 @@ int main(void) {
       printf("Exiting...\n");
       break;
     }
-    if (write_full(client_socket, buffer, strlen(buffer)) != 0) {
+
+    if (strcmp(buffer, ":online\n") == 0) {
+      write_full(client_socket, ":online\n", 8);
+      continue;
+    }
+
+    pthread_mutex_lock(&client_clock_mutex);
+    client_clock++;
+    uint64_t lc = client_clock;
+    pthread_mutex_unlock(&client_clock_mutex);
+
+    char payload[MAX_SIZE + 64];
+    snprintf(payload, sizeof(payload), "%" PRIu64 "|%s", lc, buffer);
+
+    if (write_full(client_socket, payload, strlen(payload)) != 0) {
       perror("write() failed");
       break;
     }
