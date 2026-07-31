@@ -1,20 +1,17 @@
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "helpers.h"
+
 #define MAX_SIZE 1024
 #define REPLY_SIZE 2048
 #define PORT 8080
-
-void clean_buffer(char *buffer) {
-  for (int i = 0; i < MAX_SIZE; i++) {
-    buffer[i] = '\0';
-  }
-}
 
 void *receive_server_data(void *arg) {
   int client_socket = *(int *)arg;
@@ -25,9 +22,6 @@ void *receive_server_data(void *arg) {
     bytes_recv = read(client_socket, msg_received, sizeof(msg_received) - 1);
     if (bytes_recv > 0) {
       msg_received[bytes_recv] = '\0';
-      if (strcmp(msg_received, "Ok\n") == 0) {
-        continue;
-      }
       printf("\r\033[K");
       printf("%s", msg_received);
       printf("You :");
@@ -44,10 +38,10 @@ void *receive_server_data(void *arg) {
 }
 
 int main(void) {
+  signal(SIGPIPE, SIG_IGN);
   int client_socket = socket(AF_INET, SOCK_STREAM, 0);
   if (client_socket < 0) {
-    perror("socket() failed");
-    return 1;
+    die("socket() failed");
   }
   const struct sockaddr_in server_info = {.sin_family = AF_INET,
                                           .sin_port = htons(PORT),
@@ -55,9 +49,7 @@ int main(void) {
                                               inet_addr("127.0.0.1")};
   if (connect(client_socket, (struct sockaddr *)&server_info,
               sizeof(server_info)) < 0) {
-    perror("connect() failed");
-    close(client_socket);
-    return 1;
+    die("connect() failed");
   }
   printf("Connected to server at 127.0.0.1:%d\n", PORT);
   char buffer[MAX_SIZE];
@@ -65,35 +57,38 @@ int main(void) {
   printf("Enter your username \n");
   fgets(username, sizeof(username), stdin);
   username[strcspn(username, "\n")] = '\0';
-  if (write(client_socket, username, strlen(username)) <= 0) {
-    perror("Writing username failed");
-    close(client_socket);
-    return 1;
+  memset(username + strlen(username), 0,
+         sizeof(username) - strlen(username));
+  if (write_full(client_socket, username, sizeof(username)) != 0) {
+    die("Writing username failed");
   }
   pthread_t recv_thread;
   if (pthread_create(&recv_thread, NULL, receive_server_data,
                      (void *)&client_socket) != 0) {
-    perror("error creating the thread");
-    close(client_socket);
-    return 1;
+    die("error creating the thread");
   }
+
+  printf("You :");
+  fflush(stdout);
   while (1) {
-    printf("You :");
     if (!fgets(buffer, MAX_SIZE, stdin)) {
       printf("\nConnection closed by client.\n");
       break;
     }
     if (strcmp(buffer, ":end\n") == 0) {
-      write(client_socket, ":end\n", 5);
+      write_full(client_socket, ":end\n", 5);
       printf("Exiting...\n");
       break;
     }
-    if (write(client_socket, buffer, strlen(buffer)) <= 0) {
+    if (write_full(client_socket, buffer, strlen(buffer)) != 0) {
       perror("write() failed");
       break;
     }
+    printf("You :");
+    fflush(stdout);
   }
-  close(client_socket);
+  shutdown(client_socket, SHUT_WR);
   pthread_join(recv_thread, NULL);
+  close(client_socket);
   return 0;
 }

@@ -9,6 +9,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "helpers.h"
+
 #define MAX_CLIENTS 10
 #define PORT 8080
 
@@ -54,18 +56,13 @@ void *handle_client(void *arg) {
   char username[50];
 
   // Receive username from client
-  ssize_t bytes_received;
-  bytes_received =
-      recv(my_client.client_socket, username, sizeof(username) - 1, 0);
-
-  if (bytes_received <= 0) {
-    perror("error receiving the username");
+  if (read_full(my_client.client_socket, username, sizeof(username)) != 0) {
     pthread_mutex_lock(&mutex);
     empty_client_fds(client_list, my_client);
     pthread_mutex_unlock(&mutex);
     return NULL;
   }
-  username[bytes_received] = '\0';
+  username[sizeof(username) - 1] = '\0';
   // Save client's username
   pthread_mutex_lock(&mutex);
   for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -80,6 +77,7 @@ void *handle_client(void *arg) {
 
   printf("\033[1;32m%s has connected\033[0m\n", username);
   bool break_outer_loop = false;
+  ssize_t bytes_received;
   while (1) {
     bytes_received =
         recv(my_client.client_socket, buffer, sizeof(buffer) - 1, 0);
@@ -138,7 +136,8 @@ void *handle_client(void *arg) {
                  "==================\nTotal: %d users online\n", user_count);
         strcat(online_users, footer);
         pthread_mutex_unlock(&mutex);
-        send(my_client.client_socket, online_users, strlen(online_users), 0);
+        write_full(my_client.client_socket, online_users,
+                   strlen(online_users));
         msg = end + 1;
         continue;
       } else {
@@ -156,7 +155,8 @@ void *handle_client(void *arg) {
         }
         pthread_mutex_unlock(&mutex);
         for (int i = 0; i < target_count; i++) {
-          send(target_sockets[i], formatted_msg, strlen(formatted_msg), 0);
+          write_full(target_sockets[i], formatted_msg,
+                     strlen(formatted_msg));
         }
         printf("%s", formatted_msg);
       }
@@ -179,8 +179,7 @@ int main(void) {
                    // try to send them a message
   int server_socket = socket(AF_INET, SOCK_STREAM, 0);
   if (server_socket < 0) {
-    perror("socket failed");
-    exit(EXIT_FAILURE);
+    die("socket failed");
   }
   int opt = 1;
   setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -191,14 +190,10 @@ int main(void) {
   server_addr.sin_port = htons(PORT);
   if (bind(server_socket, (struct sockaddr *)&server_addr,
            sizeof(server_addr)) < 0) {
-    perror("bind failed");
-    close(server_socket);
-    exit(EXIT_FAILURE);
+    die("bind failed");
   }
   if (listen(server_socket, MAX_CLIENTS) < 0) {
-    perror("listen failed");
-    close(server_socket);
-    exit(EXIT_FAILURE);
+    die("listen failed");
   }
   printf("server listening on port %d\n", PORT);
   while (1) {
@@ -243,6 +238,5 @@ int main(void) {
   }
   pthread_mutex_destroy(&mutex);
   close(server_socket);
-  pthread_join(tid, NULL);
   return 0;
 }
